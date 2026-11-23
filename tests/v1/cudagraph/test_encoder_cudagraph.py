@@ -2419,3 +2419,38 @@ class TestQwen3OmniAudioEncoderCudaGraphReplay:
         assert self.mgr.graph_misses == misses + 1
         assert result is not None
         torch.testing.assert_close(result[0], self._eager(mm_kwargs)[0], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize(
+    ("backend", "supported"),
+    [
+        ("FLASH_ATTN", True),
+        ("ROCM_AITER_FA", True),
+        # The default ViT backend on RDNA4.
+        ("TRITON_ATTN", True),
+        # The host-side `max_seqlen` / `.tolist()` readers cannot be captured.
+        ("TORCH_SDPA", False),
+        ("FLASHINFER", False),
+    ],
+)
+def test_minimax_m3_encoder_cudagraph_attn_backend(backend, supported):
+    from vllm.models.minimax_m3.common.encoder_cudagraph import (
+        MiniMaxM3EncoderCudaGraphMixin,
+    )
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+    host = SimpleNamespace(
+        multimodal_config=None,
+        vision_tower=SimpleNamespace(
+            vision_model=SimpleNamespace(attn_backend=AttentionBackendEnum[backend]),
+            out_hidden_size=64,
+        ),
+    )
+    get_config = MiniMaxM3EncoderCudaGraphMixin.get_encoder_cudagraph_config
+    if not supported:
+        with pytest.raises(ValueError, match=backend):
+            get_config(cast(Any, host))
+        return
+    config = get_config(cast(Any, host))
+    assert config.modalities == ["image"]
+    assert "max_seqlen" in config.buffer_keys

@@ -19,7 +19,7 @@ from vllm.platforms import current_platform
 from vllm.platforms.cpu import CpuPlatform
 from vllm.platforms.cuda import CudaPlatform
 from vllm.platforms.interface import DeviceCapability
-from vllm.platforms.rocm import RocmPlatform, on_mi3xx
+from vllm.platforms.rocm import RocmPlatform, on_mi3xx, on_rdna4
 from vllm.utils.torch_utils import set_default_torch_dtype, set_random_seed
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 from vllm.v1.attention.selector import _cached_get_attn_backend
@@ -62,7 +62,13 @@ def test_mha_attn_platform(default_vllm_config, device: str):
             patch("vllm.model_executor.models.vision.current_platform", RocmPlatform()),
         ):
             attn = MMEncoderAttention(16, 64, scale=1)
-            assert attn.attn_backend == AttentionBackendEnum.FLASH_ATTN
+            # RDNA4 defaults to the Triton encoder attention, the rest of ROCm
+            # to flash_attn.
+            assert attn.attn_backend == (
+                AttentionBackendEnum.TRITON_ATTN
+                if on_rdna4()
+                else AttentionBackendEnum.FLASH_ATTN
+            )
     else:
         # Test CUDA with head_size=64 (divisible by 32)
         # - should use vLLM's FlashAttention
